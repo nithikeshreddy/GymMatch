@@ -1,6 +1,21 @@
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
+.envrc
+
+# Private credentials and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+# Dependencies and generated output
 node_modules/
 dist/
+coverage/
+test-results/
+playwright-report/
+*.log
 .DS_Store
