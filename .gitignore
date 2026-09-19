@@ -3,6 +3,10 @@
 *.env
 .envrc
 
+# Commit only the reviewed, placeholder-only setup templates.
+!/backend/.env.example
+!/frontend/.env.example
+
 # Private credentials and certificates
 *.pem
 *.key

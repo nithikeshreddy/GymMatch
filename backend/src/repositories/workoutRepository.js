@@ -1,6 +1,6 @@
 import pool from "../config/db.js";
 
-export async function createWorkout(userId, data) {
+export async function createWorkout(userId, data, db = pool) {
     const {
         exercise_id,
         weight,
@@ -13,10 +13,10 @@ export async function createWorkout(userId, data) {
         is_pr
     } = data;
 
-    const result = await pool.query(
+    const result = await db.query(
         `INSERT INTO workout_logs
-        (user_id, exercise_id, weight, reps, sets, duration_minutes, rest_time, notes, workout_date, is_pr)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        (user_id, exercise_id, weight, reps, sets, duration_minutes, rest_time, notes, workout_date, is_pr, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::date, CURRENT_DATE),$10,clock_timestamp())
         RETURNING *`,
         [
             userId,
@@ -64,19 +64,8 @@ export async function getWorkoutsByUser(userId, limit, offset) {
     return result.rows;
 }
 
-export async function getMaxWeight(userId, exerciseId) {
-    const result = await pool.query(
-        `SELECT MAX(weight) AS max_weight
-         FROM workout_logs
-         WHERE user_id = $1 AND exercise_id = $2`,
-        [userId, exerciseId]
-    );
-
-    return result.rows[0]?.max_weight ?? null;
-}
-
-export async function getExerciseById(exerciseId) {
-    const result = await pool.query(
+export async function getExerciseById(exerciseId, db = pool) {
+    const result = await db.query(
         `SELECT * FROM exercises WHERE id = $1`,
         [exerciseId]
     );
@@ -84,16 +73,16 @@ export async function getExerciseById(exerciseId) {
     return result.rows[0];
 }
 
-export async function getWorkoutById(workoutId) {
-    const result = await pool.query(
-        `SELECT * FROM workout_logs WHERE id = $1`,
-        [workoutId]
+export async function getWorkoutById(workoutId, userId, db = pool) {
+    const result = await db.query(
+        `SELECT * FROM workout_logs WHERE id = $1 AND user_id = $2`,
+        [workoutId, userId]
     );
 
     return result.rows[0];
 }
 
-export async function updateWorkout(workoutId, userId, data) {
+export async function updateWorkout(workoutId, userId, data, db = pool) {
     const updates = [];
     const values = [workoutId, userId];
     let paramCount = 3;
@@ -151,7 +140,7 @@ export async function updateWorkout(workoutId, userId, data) {
         RETURNING *
     `;
 
-    const result = await pool.query(query, values);
+    const result = await db.query(query, values);
 
     if (result.rows.length === 0) {
         throw new Error("Workout not found or unauthorized");
@@ -160,8 +149,8 @@ export async function updateWorkout(workoutId, userId, data) {
     return result.rows[0];
 }
 
-export async function deleteWorkout(workoutId, userId) {
-    const result = await pool.query(
+export async function deleteWorkout(workoutId, userId, db = pool) {
+    const result = await db.query(
         `DELETE FROM workout_logs
          WHERE id = $1 AND user_id = $2
          RETURNING *`,
@@ -173,4 +162,43 @@ export async function deleteWorkout(workoutId, userId) {
     }
 
     return result.rows[0];
+}
+
+// Serialize a user's writes before deriving PRs from their saved history.
+export async function withWorkoutTransaction(userId, operation) {
+    const db = await pool.connect();
+    try {
+        await db.query("BEGIN");
+        const user = await db.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+        if (!user.rowCount) throw new Error("User not found");
+        const result = await operation(db);
+        await db.query("COMMIT");
+        return result;
+    } catch (error) {
+        await db.query("ROLLBACK");
+        throw error;
+    } finally {
+        db.release();
+    }
+}
+
+export async function refreshPersonalRecords(userId, exerciseIds, db) {
+    await db.query(
+        `WITH history AS (
+            SELECT w.id, w.weight, e.type,
+                MAX(w.weight) OVER (
+                    PARTITION BY w.exercise_id
+                    ORDER BY w.created_at, w.id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                ) AS previous_max
+            FROM workout_logs w
+            JOIN exercises e ON e.id = w.exercise_id
+            WHERE w.user_id = $1 AND w.exercise_id = ANY($2::int[])
+        )
+        UPDATE workout_logs w
+        SET is_pr = (h.type = 'strength' AND h.weight IS NOT NULL
+                     AND (h.previous_max IS NULL OR h.weight > h.previous_max))
+        FROM history h WHERE w.id = h.id`,
+        [userId, exerciseIds]
+    );
 }

@@ -30,11 +30,18 @@ CREATE TABLE profiles (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE exercises (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('strength', 'cardio')),
+    UNIQUE (name, type)
+);
+
 CREATE TABLE workout_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
-    exercise_id INT NOT NULL,
+    exercise_id INT NOT NULL REFERENCES exercises(id),
 
     weight INT,
     reps INT,

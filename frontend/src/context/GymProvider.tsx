@@ -14,13 +14,14 @@ export function GymProvider({ children }: { children: ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const userId = session?.user.id;
+  const token = session?.token;
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !token) return;
     const apiUrl = import.meta.env.VITE_API_URL;
     const socketUrl =
       import.meta.env.VITE_SOCKET_URL ||
       (apiUrl?.startsWith("http") ? new URL(apiUrl).origin : undefined);
-    const client = io(socketUrl, { autoConnect: false });
+    const client = io(socketUrl, { autoConnect: false, auth: { token } });
     client.on("connect", () => {
       client.emit("register_user", userId);
       setSocket(client);
@@ -36,7 +37,7 @@ export function GymProvider({ children }: { children: ReactNode }) {
       client.removeAllListeners();
       client.disconnect();
     };
-  }, [userId, notify]);
+  }, [userId, token, notify]);
   const exercises = useMemo(() => {
     const catalog = new Map(
       configuredExercises.map((exercise) => [exercise.id, exercise]),
